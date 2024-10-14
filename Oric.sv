@@ -1,12 +1,9 @@
-module guest_top(
+module guest_top
+(
 	input         CLOCK_27,
 `ifdef USE_CLOCK_50
 	input         CLOCK_50,
 `endif
-
-// `ifdef XILINX
-// 	output 		  CLOCK_50_buff,
-// `endif
 
 	output        LED,
 	output [VGA_BITS-1:0] VGA_R,
@@ -78,6 +75,12 @@ module guest_top(
 	output        I2S_LRCK,
 	output        I2S_DATA,
 `endif
+`ifdef I2S_AUDIO_HDMI
+	output        HDMI_MCLK,
+	output        HDMI_BCK,
+	output        HDMI_LRCK,
+	output        HDMI_SDATA,
+`endif
 `ifdef SPDIF_AUDIO
 	output        SPDIF,
 `endif
@@ -125,22 +128,21 @@ localparam bit BIG_OSD = 0;
 `endif
 
 `ifdef USE_AUDIO_IN
-wire TAPE_SOUND = AUDIO_IN;
+localparam bit USE_AUDIO_IN = 1;
+wire TAPE_SOUND=AUDIO_IN;
 `else
-wire TAPE_SOUND = UART_RX;
+localparam bit USE_AUDIO_IN = 0;
+wire TAPE_SOUND=UART_RX;
 `endif
 
-`ifdef XILINX
-`include "build_id.vh" 
-`else
+
 `include "build_id.v" 
-`endif
 
 localparam CONF_STR = {
-	"ORIC;ROM;",
+	"Oric;ROM;",
 	"S0U,DSK,Mount Drive A:;",
 	`SEP
-	"F,TAP,Load;",
+	"F3,TAP,Load;",
 	"T1,Tape Play/Stop;",
 	"O2,Tape Sounds,Off,On;",
 	`SEP
@@ -152,10 +154,11 @@ localparam CONF_STR = {
 	"O89,Stereo,Off,ABC (West Europe),ACB (East Europe);",
 	`SEP
 	"T0,Reset;",
-  	"V,v3.0-POSEIDON.",`BUILD_DATE
+  	"V,v3.0.",`BUILD_DATE
 };
 wire        clk_72;
 wire        clk_24;
+wire        clk_hdmi;
 wire        pll_locked;
 
 wire        key_pressed;
@@ -164,7 +167,8 @@ wire        key_strobe;
 wire        key_extended;
 wire        r, g, b; 
 wire        hs, vs;
-
+wire        HBlank;
+wire        VBlank;
 wire  [1:0] buttons, switches;
 wire			ypbpr;
 wire        scandoublerD;
@@ -207,27 +211,26 @@ always @(posedge clk_24) begin
 	reset <= (!pll_locked | status[0] | buttons[1] | old_rom != rom | old_disk_enable != disk_enable | rom_downl);
 end
 
-`ifdef XILINX
-	pll pll			// Xilinx PLL
-	(
-		// Clock out ports
-		.clk_out1(clk_24),        
-		.clk_out2(clk_72),    
-		// Status and control signals
-		.reset(1'b0),              // input reset
-		.locked(pll_locked),       // output locked
-		// Clock in ports
-		.clk_in1(CLOCK_50)         // input  clk_in1
-		// .clk_in1_pll(CLOCK_50_buff)	// output clk_in1 buffered
-	);
 
-`else
 	pll pll (
-		.inclk0	  (CLOCK_27   ),
+		.inclk0	  (CLOCK_27  ),
 		.c0       (clk_24     ),
 		.c1       (clk_72     ),
+`ifdef USE_HDMI
+		.c2       (clk_hdmi   ),
+`endif
 		.locked   (pll_locked )
 		);
+
+`ifdef USE_HDMI
+wire        i2c_start;
+wire        i2c_read;
+wire  [6:0] i2c_addr;
+wire  [7:0] i2c_subaddr;
+wire  [7:0] i2c_dout;
+wire  [7:0] i2c_din;
+wire        i2c_ack;
+wire        i2c_end;
 `endif
 
 user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(2), .FEATURES(32'h0 | (BIG_OSD << 13) | (HDMI << 14))) user_io
@@ -239,6 +242,18 @@ user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(2), .FEATURES(32'h0 | (BIG_OSD
 	.SPI_SS_IO      	(CONF_DATA0     	),
 	.SPI_MISO       	(SPI_DO        	),
 	.SPI_MOSI       	(SPI_DI         	),
+
+`ifdef USE_HDMI
+	.i2c_start      (i2c_start      ),
+	.i2c_read       (i2c_read       ),
+	.i2c_addr       (i2c_addr       ),
+	.i2c_subaddr    (i2c_subaddr    ),
+	.i2c_dout       (i2c_dout       ),
+	.i2c_din        (i2c_din        ),
+	.i2c_ack        (i2c_ack        ),
+	.i2c_end        (i2c_end        ),
+`endif
+
 	.buttons        	(buttons        	),
 	.switches       	(switches      	),
 	.scandoubler_disable (scandoublerD	),
@@ -251,7 +266,7 @@ user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(2), .FEATURES(32'h0 | (BIG_OSD
 	.joystick_1       ( joystick_1      ),
 	.status         	(status         	),
 	// SD CARD
-        .sd_lba                      (sd_lba        ),
+   .sd_lba                      (sd_lba        ),
 	.sd_rd                       (sd_rd         ),
 	.sd_wr                       (sd_wr         ),
 	.sd_ack                      (sd_ack        ),
@@ -267,7 +282,9 @@ user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(2), .FEATURES(32'h0 | (BIG_OSD
 	.img_size                    (img_size      )
 );
 
-mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(VGA_BITS), .BIG_OSD(BIG_OSD)) mist_video (	
+
+
+	mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(VGA_BITS), .BIG_OSD(BIG_OSD)) mist_video (	
 	.clk_sys      (clk_24     ),
 	.SPI_SCK      (SPI_SCK    ),
 	.SPI_SS3      (SPI_SS3    ),
@@ -288,6 +305,61 @@ mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(VGA_BITS), .B
 	.ypbpr        (ypbpr      )
 	);
 
+`ifdef USE_HDMI
+
+  i2c_master #(28_000_000) i2c_master (
+	.CLK         (clk_hdmi),
+	.I2C_START   (i2c_start),
+	.I2C_READ    (i2c_read),
+	.I2C_ADDR    (i2c_addr),
+	.I2C_SUBADDR (i2c_subaddr),
+	.I2C_WDATA   (i2c_dout),
+	.I2C_RDATA   (i2c_din),
+	.I2C_END     (i2c_end),
+	.I2C_ACK     (i2c_ack),
+
+	//I2C bus
+	.I2C_SCL     (HDMI_SCL),
+	.I2C_SDA     (HDMI_SDA)
+);
+
+mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(8), .USE_BLANKS(1), .BIG_OSD(BIG_OSD), .VIDEO_CLEANER(1)) hdmi_video (
+	.clk_sys     ( clk_hdmi   ),
+
+	.SPI_SCK     ( SPI_SCK    ),
+	.SPI_SS3     ( SPI_SS3    ),
+	.SPI_DI      ( SPI_DI     ),
+
+	.scanlines   ( status[5:4]  ),
+
+	.ce_divider  ( 3'd1       ),
+
+	.scandoubler_disable ( scandoublerD ),
+	.no_csync    ( 1'b1       ),
+	.ypbpr       ( 1'b0       ),
+	.rotate      ( 2'b00      ),
+	.blend       ( 1'b0       ),
+
+	.R           ( r | progress ),
+	.G           ( g | progress),
+	.B           ( b | progress ),
+
+	.HBlank      ( HBlank      ),
+	.VBlank      ( VBlank      ),
+	.HSync       ( hs      ),
+	.VSync       ( vs      ),
+
+	.VGA_R       ( HDMI_R      ),
+	.VGA_G       ( HDMI_G      ),
+	.VGA_B       ( HDMI_B      ),
+	.VGA_VS      ( HDMI_VS     ),
+	.VGA_HS      ( HDMI_HS     ),
+	.VGA_DE      ( HDMI_DE     )
+);
+assign HDMI_PCLK = clk_hdmi;
+
+`endif
+
 oricatmos oricatmos(
 	.clk_in           (clk_24       ),
 	.RESET            (reset),
@@ -304,6 +376,8 @@ oricatmos oricatmos(
 	.VIDEO_B	  (b		),
 	.VIDEO_HSYNC	  (hs           ),
 	.VIDEO_VSYNC	  (vs           ),
+	.VIDEO_HBLANK	  (HBlank       ),
+	.VIDEO_VBLANK	  (VBlank       ),
 	.K7_TAPEIN        (tap_running ? tap_out : TAPE_SOUND),
 	.K7_TAPEOUT       (tap_in       ),
 	.K7_REMOTE        (remote       ),
@@ -492,8 +566,8 @@ wire progress;
 progressbar #(.X_OFFSET(66), .Y_OFFSET(36)) progressbar (
 	.clk(clk_24),
 	.ce_pix(tap_ce_cnt[1:0] == 0),
-	.hblank(~hs),
-	.vblank(~vs),
+	.hblank(HBlank),
+	.vblank(VBlank),
 	.enable(tap_running),
 	.current(tap_ad),
 	.max(tap_last),
@@ -562,7 +636,7 @@ audiodac_r(
    .dac_o	(AUDIO_R)
   );
 
-wire [31:0] clk_rate =  32'd28_375_168;
+wire [31:0] clk_rate =  32'd24_000_000;
 
 `ifdef I2S_AUDIO
 i2s i2s (
@@ -577,6 +651,14 @@ i2s i2s (
 	.left_chan ({~dac_in_l[15],dac_in_l[14:0]}),
 	.right_chan({~dac_in_r[15],dac_in_r[14:0]})
 );
+`ifdef I2S_AUDIO_HDMI
+assign HDMI_MCLK = 0;
+always @(posedge clk_72) begin
+	HDMI_BCK <= I2S_BCK;
+	HDMI_LRCK <= I2S_LRCK;
+	HDMI_SDATA <= I2S_DATA;
+end
+`endif
 `endif
 
 `ifdef SPDIF_AUDIO

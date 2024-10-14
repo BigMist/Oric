@@ -65,6 +65,8 @@ entity oricatmos is
     VIDEO_B           : out   std_logic;
     VIDEO_HSYNC       : out   std_logic;
     VIDEO_VSYNC       : out   std_logic;
+    VIDEO_HBLANK      : out   std_logic;
+    VIDEO_VBLANK      : out   std_logic;
     VIDEO_SYNC        : out   std_logic;
 	 BLANKINGn         : out   std_logic;
 	 ram_ad            : out std_logic_vector(15 downto 0);
@@ -340,7 +342,9 @@ inst_ula : entity work.ULA
       SYNC       	=> VIDEO_SYNC,
 		BLANKn      => BLANKINGn,
 		HSYNC      	=> VIDEO_HSYNC,
-		VSYNC      	=> VIDEO_VSYNC		
+		VSYNC      	=> VIDEO_VSYNC,		
+		HBLANK      => VIDEO_HBLANK,
+		VBLANK      => VIDEO_VBLANK		
 );
 
 via_pa_out_oe_l <= not via_pa_out_oe;

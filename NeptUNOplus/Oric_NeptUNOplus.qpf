@@ -19,13 +19,13 @@
 #
 # Quartus Prime
 # Version 22.1std.1 Build 917 02/14/2023 SC Lite Edition
-# Date created = 20:27:42  December 18, 2023
+# Date created = 10:34:48  February 12, 2024
 #
 # -------------------------------------------------------------------------- #
 
 QUARTUS_VERSION = "22.1"
-DATE = "20:27:42  December 18, 2023"
+DATE = "10:34:48  February 12, 2024"
 
 # Revisions
 
-PROJECT_REVISION = "Oric_unamiga"
+PROJECT_REVISION = "Oric_NeptUNOplus"

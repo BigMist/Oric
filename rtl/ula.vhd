@@ -112,8 +112,10 @@ port (
 	B          :   out std_logic;                     -- Blue                         -- pin 19
 	SYNC       :   out std_logic;                     -- Synchronisation              -- pin 16        
 	BLANKn     :   buffer std_logic;                     -- Blanking signal
-	                                                  -- VCC                          -- pin 24
-	                                                  -- GND                          -- pin 06
+	                                                  -- VCC                          -- pin 24 
+																	  -- GND                          -- pin 06
+	HBLANK     :   out std_logic;
+	VBLANK     :   out std_logic;
 	HSYNC      :   out std_logic;
 	VSYNC      :   out std_logic
 );
@@ -371,7 +373,16 @@ begin
 	CLK_FLASH    <= lCTR_FLASH(4); 	-- Flash clock toggles every 16 video frames
 	lCOMPSYNC    <= not (lHSYNCn xor lVSYNCn);
 	BLANKINGn    <= lVBLANKn and lHBLANKn;
-   
+   --CLK_PIX      <= CLK_PIXEL_INT;
+	
+	process
+	begin
+		wait until rising_edge(CLK_24);
+		if CLK_PIXEL_INT = '1' then
+			HBLANK <= not lHBLANKn;
+			VBLANK <= not lVBLANKn;
+		end if;
+	end process;
 
 	-----------------------------
 	-----------------------------

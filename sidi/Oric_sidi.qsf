@@ -42,7 +42,7 @@ set_global_assignment -name DEVICE EP4CE22F17C8
 set_global_assignment -name TOP_LEVEL_ENTITY sidi_top
 set_global_assignment -name ORIGINAL_QUARTUS_VERSION 5.1
 set_global_assignment -name PROJECT_CREATION_TIME_DATE "22:49:11  JANUARY 31, 2006"
-set_global_assignment -name LAST_QUARTUS_VERSION "22.1std.1 Lite Edition"
+set_global_assignment -name LAST_QUARTUS_VERSION "17.1.0 Lite Edition"
 set_global_assignment -name AUTO_MERGE_PLLS OFF
 set_global_assignment -name IGNORE_CLOCK_SETTINGS ON
 set_global_assignment -name TPD_REQUIREMENT "5 ns"
