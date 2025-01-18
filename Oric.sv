@@ -219,9 +219,9 @@ end
 		.inclk0	  (CLOCK_27  ),
 		.c0       (clk_24     ),
 		.c1       (clk_72     ),
-//`ifdef USE_HDMI
+`ifdef USE_HDMI
 		.c2       (clk_hdmi   ),
-//`endif
+`endif
 		.locked   (pll_locked )
 		);
 
@@ -667,16 +667,6 @@ wire [15:0] psg_b_ext = {2'b0, psg_b,2'b0}; // Extiende a 16 bits
 wire [15:0] psg_c_ext = {2'b0, psg_c,2'b0}; // Extiende a 16 bits
 wire [15:0] psg_out_ext = {1'b0,psg_out,1'b0}; // Extiende a 16 bits
 
-
-
-//always @ (psg_a,psg_b,psg_c,psg_out,stereo) begin
-//                case (stereo)
-//			2'b01  : {psg_l,psg_r} <= {{{2'b0,psg_a} + {2'b0,psg_b}},2'b0,{{2'b0,psg_c} + {2'b0,psg_b}},2'b0};
-//			2'b10  : {psg_l,psg_r} <= {{{2'b0,psg_a} + {2'b0,psg_c}},2'b0,{{2'b0,psg_c} + {2'b0,psg_b}},2'b0};
-//			default: {psg_l,psg_r} <= {1'b 0,psg_out,2'b0,psg_out,2'b0};
-//
-//                endcase
-//end
 
 always @(posedge clk_72) begin
     case (stereo)
