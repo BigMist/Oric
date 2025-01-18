@@ -13,8 +13,8 @@ module progressbar (
 	output       pix
 );
 
-parameter X_OFFSET = 11'd68;
-parameter Y_OFFSET = 11'd20;
+parameter X_OFFSET = 11'd136;
+parameter Y_OFFSET = 11'd0;
 
 reg [7:0] progress;
 /*

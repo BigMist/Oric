@@ -108,6 +108,8 @@ localparam bit QSPI = 0;
 
 `ifdef VGA_8BIT
 localparam VGA_BITS = 8;
+`elsif VGA_4BIT
+localparam VGA_BITS = 4;
 `else
 localparam VGA_BITS = 6;
 `endif
@@ -149,6 +151,7 @@ localparam CONF_STR = {
 	"O3,ROM,Oric Atmos,Oric 1;",
 	"O6,FDD Controller,Off,On;",
 	"O7,Drive Write,Allow,Prohibit;",
+	"OAB,CPU,6502,65C02,65C816;",
 	`SEP
 	"O45,Scandoubler Fx,None,CRT 25%,CRT 50%,CRT 75%;",
 	"O89,Stereo,Off,ABC (West Europe),ACB (East Europe);",
@@ -216,9 +219,9 @@ end
 		.inclk0	  (CLOCK_27  ),
 		.c0       (clk_24     ),
 		.c1       (clk_72     ),
-`ifdef USE_HDMI
+//`ifdef USE_HDMI
 		.c2       (clk_hdmi   ),
-`endif
+//`endif
 		.locked   (pll_locked )
 		);
 
@@ -289,9 +292,9 @@ user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(2), .FEATURES(32'h0 | (BIG_OSD
 	.SPI_SCK      (SPI_SCK    ),
 	.SPI_SS3      (SPI_SS3    ),
 	.SPI_DI       (SPI_DI     ),
-	.R            (r | progress ),
-	.G            (g | progress ),
-	.B            (b | progress ),
+	.R            (progress ? !r : r ),
+	.G            (progress ? !g : g ),
+	.B            (progress ? !b : b ),
 	.HSync        (hs         ),
 	.VSync        (vs         ),
 	.VGA_R        (VGA_R      ),
@@ -363,6 +366,7 @@ assign HDMI_PCLK = clk_hdmi;
 oricatmos oricatmos(
 	.clk_in           (clk_24       ),
 	.RESET            (reset),
+	.cpu_type         (status[11:10]),
 	.key_pressed      (key_pressed  ),
 	.key_code         (key_code     ),
 	.key_extended     (key_extended ),
@@ -575,9 +579,61 @@ progressbar #(.X_OFFSET(66), .Y_OFFSET(36)) progressbar (
 );
 
 
-assign      SDRAM_CLK = ~clk_72;
+//assign      SDRAM_CLK = ~clk_72;
 assign      SDRAM_CKE = 1;
 
+altddio_out
+#(
+        .extend_oe_disable("OFF"),
+        .intended_device_family("Cyclone 10 LP"),
+        .invert_output("OFF"),
+        .lpm_hint("UNUSED"),
+        .lpm_type("altddio_out"),
+        .oe_reg("UNREGISTERED"),
+        .power_up_high("OFF"),
+        .width(1)
+)
+
+
+sdramclk_ddr
+(
+        .datain_h(1'b0),
+        .datain_l(1'b1),
+        .outclock(clk_72),
+        .dataout(SDRAM_CLK),
+        .aclr(1'b0),
+        .aset(1'b0),
+        .oe(1'b1),
+        .outclocken(1'b1),
+        .sclr(1'b0),
+        .sset(1'b0)
+);
+
+`ifdef SDRAM_8MB
+sdram_8mb #(72) sdram(
+	.*,
+	.SDRAM_A       (SDRAM_A[11:0]   ),
+	.init_n        ( pll_locked     ),
+	.clk           ( clk_72         ),
+	.clkref        ( phi2           ),
+
+	.port1_req     ( port1_req      ),
+	.port1_ack     ( ),
+	.port1_a       ( sdram_ad[16:1] ),
+	.port1_ds      ( sdram_we ? (sdram_ad[0] ? 2'b10 : 2'b01) : 2'b11 ),
+	.port1_we      ( sdram_we       ),
+	.port1_d       ( {sdram_din, sdram_din} ),
+	.port1_q       ( sdram_dout     ),
+	// port2 is for TAP playback
+	.port2_req     ( port2_req ),
+	.port2_ack     ( port2_ack ),
+	.port2_a       ( tap_we ? ioctl_addr[22:1] : tap_ad[22:1] ),
+	.port2_ds      ( tap_we ? (ioctl_addr[0] ? 2'b10 : 2'b01) : 2'b11 ),
+	.port2_we      ( tap_we    ),
+	.port2_d       ( {ioctl_dout, ioctl_dout} ),
+	.port2_q       ( tap_dout  )
+);
+`else
 sdram #(72) sdram(
 	.*,
 	.init_n        ( pll_locked     ),
@@ -600,23 +656,51 @@ sdram #(72) sdram(
 	.port2_d       ( {ioctl_dout, ioctl_dout} ),
 	.port2_q       ( tap_dout  )
 );
-
+`endif
 ///////////////////////////////////////////////////
 
 reg [15:0] psg_l;
 reg [15:0] psg_r;
 
-always @ (psg_a,psg_b,psg_c,psg_out,stereo) begin
-                case (stereo)
-			2'b01  : {psg_l,psg_r} <= {{{2'b0,psg_a} + {2'b0,psg_b}},2'b0,{{2'b0,psg_c} + {2'b0,psg_b}},2'b0};
-			2'b10  : {psg_l,psg_r} <= {{{2'b0,psg_a} + {2'b0,psg_c}},2'b0,{{2'b0,psg_c} + {2'b0,psg_b}},2'b0};
-			default: {psg_l,psg_r} <= {psg_out,2'b0,psg_out,2'b0};
+wire [15:0] psg_a_ext = {2'b0, psg_a,2'b0}; // Extiende a 16 bits
+wire [15:0] psg_b_ext = {2'b0, psg_b,2'b0}; // Extiende a 16 bits
+wire [15:0] psg_c_ext = {2'b0, psg_c,2'b0}; // Extiende a 16 bits
+wire [15:0] psg_out_ext = {1'b0,psg_out,1'b0}; // Extiende a 16 bits
 
-                endcase
+
+
+//always @ (psg_a,psg_b,psg_c,psg_out,stereo) begin
+//                case (stereo)
+//			2'b01  : {psg_l,psg_r} <= {{{2'b0,psg_a} + {2'b0,psg_b}},2'b0,{{2'b0,psg_c} + {2'b0,psg_b}},2'b0};
+//			2'b10  : {psg_l,psg_r} <= {{{2'b0,psg_a} + {2'b0,psg_c}},2'b0,{{2'b0,psg_c} + {2'b0,psg_b}},2'b0};
+//			default: {psg_l,psg_r} <= {1'b 0,psg_out,2'b0,psg_out,2'b0};
+//
+//                endcase
+//end
+
+always @(posedge clk_72) begin
+    case (stereo)
+        2'b01: begin
+            psg_l = (psg_a_ext + psg_b_ext) ; 
+            psg_r = (psg_c_ext + psg_b_ext) ; 
+        end
+        2'b10: begin
+            psg_l = (psg_a_ext + psg_c_ext) ; 
+            psg_r = (psg_c_ext + psg_b_ext) ; 
+        end
+        default: begin
+            psg_l = psg_out_ext; 
+            psg_r = psg_out_ext;
+		  end	
+    endcase
+	dac_in_l <= psg_l;
+	dac_in_r <= psg_r;
 end
 
-wire [15:0] dac_in_l = psg_l + { tap_sound & (tap_running ? tap_out : TAPE_SOUND), tap_sound & tap_in, 9'd0 };
-wire [15:0] dac_in_r = psg_r + { tap_sound & (tap_running ? tap_out : TAPE_SOUND), tap_sound & tap_in, 9'd0 };
+
+
+wire [15:0] dac_in_l; //= psg_l; //+ { tap_sound & (tap_running ? tap_out : TAPE_SOUND), tap_sound & tap_in, 9'd0 };
+wire [15:0] dac_in_r; //= psg_r; //+ { tap_sound & (tap_running ? tap_out : TAPE_SOUND), tap_sound & tap_in, 9'd0 };
 
 dac #(
    .c_bits	(16))
@@ -636,20 +720,19 @@ audiodac_r(
    .dac_o	(AUDIO_R)
   );
 
-wire [31:0] clk_rate =  32'd24_000_000;
+wire [31:0] clk_rate =  32'd72_000_000;
 
 `ifdef I2S_AUDIO
 i2s i2s (
 	.reset(1'b0),
-	.clk(clk_24),
+	.clk(clk_72),
 	.clk_rate(clk_rate),
 
 	.sclk(I2S_BCK),
 	.lrclk(I2S_LRCK),
 	.sdata(I2S_DATA),
-
-	.left_chan ({~dac_in_l[15],dac_in_l[14:0]}),
-	.right_chan({~dac_in_r[15],dac_in_r[14:0]})
+	.left_chan ({~dac_in_l[15],dac_in_l[14:1]}),
+	.right_chan({~dac_in_r[15],dac_in_r[14:1]})
 );
 `ifdef I2S_AUDIO_HDMI
 assign HDMI_MCLK = 0;
@@ -663,7 +746,7 @@ end
 
 `ifdef SPDIF_AUDIO
 spdif spdif (
-	.clk_i(clk_24),
+	.clk_i(clk_72),
 	.rst_i(1'b0),
 	.clk_rate_i(clk_rate),
 	.spdif_o(SPDIF),

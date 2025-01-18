@@ -48,6 +48,7 @@ entity oricatmos is
   port (
     CLK_IN            : in    std_logic;
     RESET             : in    std_logic;
+	 cpu_type          : in    std_logic_vector(1 downto 0);
 	 key_pressed       : in    std_logic;
 	 key_extended      : in    std_logic;
 	 key_code          : in    std_logic_vector(7 downto 0);
@@ -112,11 +113,17 @@ architecture RTL of oricatmos is
     signal clk_cnt            : std_logic_vector(2 downto 0) := "000";
 
     -- cpu
-    signal cpu_ad             : std_logic_vector(23 downto 0);
     signal cpu_di             : std_logic_vector(7 downto 0);
     signal cpu_di_last        : std_logic_vector(7 downto 0);
+    signal cpu_ad             : std_logic_vector(23 downto 0);
     signal cpu_do             : std_logic_vector(7 downto 0);
     signal cpu_rw             : std_logic;
+	 signal cpu1_ad            : std_logic_vector(23 downto 0);
+    signal cpu1_rw            : std_logic;
+    signal cpu1_do            : std_logic_vector(7 downto 0);
+    signal cpu2_ad            : std_logic_vector(23 downto 0);
+    signal cpu2_do            : std_logic_vector(7 downto 0);
+    signal cpu2_rw            : std_logic;
     signal cpu_irq            : std_logic;
       
 	 -- VIA
@@ -283,9 +290,14 @@ begin
 RESETn <= (not RESET and KEYB_RESETn);
 cpu_irq <= not via_irq and cont_irq;
 
+
+cpu_rw <= cpu1_rw WHEN cpu_type /= "10" ELSE cpu2_rw;
+cpu_do <= cpu1_do WHEN cpu_type /= "10" ELSE cpu2_do;
+cpu_ad <= cpu1_ad WHEN cpu_type /= "10" ELSE cpu2_ad;
+
 inst_cpu : entity work.T65
 	port map (
-		Mode    		=> "00",
+		Mode    		=> cpu_type,
       Res_n   		=> RESETn,
       Enable  		=> ENA_1MHZ_N,
       Clk     		=> CLK_IN,
@@ -294,15 +306,34 @@ inst_cpu : entity work.T65
       IRQ_n   		=> cpu_irq, -- Via and disk controller
       NMI_n   		=> KEYB_NMIn,
       SO_n    		=> '1',
-      R_W_n   		=> cpu_rw,
-      A       		=> cpu_ad,
+      R_W_n   		=> cpu1_rw,
+      A       		=> cpu1_ad,
       DI      		=> cpu_di,
-      DO      		=> cpu_do
+      DO      		=> cpu1_do
 );
 
-
+	inst_cpu2 : ENTITY work.P65C816
+		PORT MAP(
+			CLK => clk_in, -- Mapeo del reloj de entrada
+			RST_N => RESETn, -- Mapeo de la señal de reset activa baja
+			CE => ENA_1MHZ_N, -- Clock Enable (similar a Enable en T65)
+			RDY_IN => '1', -- Ready siempre activo ('1')
+			NMI_N => KEYB_NMIn, -- NMI
+			IRQ_N => cpu_irq, -- IRQ entrada, mapear con la señal de interrupción
+			ABORT_N => '1', -- ABORT no utilizado ('1')
+			D_IN => cpu_di, -- Datos de entrada
+			D_OUT => cpu2_do, -- Datos de salida
+			A_OUT => cpu2_ad, -- Dirección de salida
+			WE => cpu2_rw, -- Write Enable (escribir/leer, similar a R_W_n)
+			RDY_OUT => OPEN, -- No usamos RDY_OUT, por eso lo dejamos desconectado
+			VPA => OPEN, -- Vector Address, no lo usamos, por eso lo desconectamos
+			VDA => OPEN, -- Vector Data Address, no lo usamos
+			MLB => OPEN, -- Memory Lock Byte, no utilizado
+			VPB => OPEN -- Vector Pull, no utilizado
+		);
+		
 --ram_ad  <= ula_AD_SRAM when (ula_PHI2 = '0')else cpu_ad(15 downto 0);
-ram_ad  <= ula_AD_SRAM when (ula_PHI2 = '0')else cpu_ad(15 downto 0);
+ram_ad  <= ula_AD_SRAM when (ula_PHI2 = '0') else cpu_ad(15 downto 0);
 
 
 ram_d   <= cpu_do;
