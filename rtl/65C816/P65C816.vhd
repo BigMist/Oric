@@ -451,7 +451,11 @@ begin
 	end process;
 	
 	--Data bus
-	D_OUT <= P(7) & P(6) & (P(5) or EF) & (P(4) or (not (GotInterrupt) and EF)) & P(3 downto 0) when MC.OUT_BUS = "001" else
+	-- Bit 4 of the pushed status: X in native mode; in emulation mode the B
+	-- flag, 1 for BRK/COP/PHP and 0 for IRQ/NMI. It used to be P(4) or ...,
+	-- and X is forced to 1 in emulation mode, so every IRQ was pushed with
+	-- B = 1 and looked like a BRK to handlers that test it.
+	D_OUT <= P(7) & P(6) & (P(5) or EF) & ((P(4) and not EF) or (not (GotInterrupt) and EF)) & P(3 downto 0) when MC.OUT_BUS = "001" else
 				PC(15 downto 8) when MC.OUT_BUS = "010" and MC.BYTE_SEL(1) = '1' else
 				PC(7 downto 0) when MC.OUT_BUS = "010" and MC.BYTE_SEL(1) = '0' else
 				AA(15 downto 8) when MC.OUT_BUS = "011" and MC.BYTE_SEL(1) = '1' else
