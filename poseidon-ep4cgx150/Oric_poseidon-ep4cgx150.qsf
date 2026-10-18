@@ -385,3 +385,4 @@ set_global_assignment -name POWER_BOARD_THERMAL_MODEL "NONE (CONSERVATIVE)"
 set_global_assignment -name QIP_FILE ../rtl/65C816/65C816.qip
 set_global_assignment -name QIP_FILE ../Oric.qip
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
+set_global_assignment -name SDC_FILE Oric.sdc
