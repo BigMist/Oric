@@ -79,16 +79,14 @@ END Microdisc;
 
 ARCHITECTURE Behavioral OF Microdisc IS
 	COMPONENT wd1793
-		GENERIC 
+		GENERIC
 		(
-			RWMODE          : INTEGER := 1;
-			EDSK            : INTEGER := 0
+			STRICT_ID     : INTEGER := 0
 		);
-		PORT 
+		PORT
 		(
 			clk_sys       : IN std_logic;
 			ce            : IN std_logic;
- 
 			reset         : IN std_logic;
 			io_en         : IN std_logic;
 			rd            : IN std_logic;
@@ -96,19 +94,16 @@ ARCHITECTURE Behavioral OF Microdisc IS
 			addr          : IN std_logic_vector (1 DOWNTO 0);
 			din           : IN std_logic_vector (7 DOWNTO 0);
 			dout          : OUT std_logic_vector (7 DOWNTO 0);
- 
-			intrq         : OUT std_logic;
 			drq           : OUT std_logic;
- 
+			intrq         : OUT std_logic;
 			busy          : OUT std_logic;
-			ready         : IN std_logic;
-			layout        : IN std_logic;
-			side          : IN std_logic;
- 
-			img_mounted   : IN std_logic;
- 
+			headloaded    : OUT std_logic;
 			wp            : IN std_logic;
-			img_size      : IN std_logic_vector (19 DOWNTO 0);
+			side          : IN std_logic;
+			ready         : IN std_logic;
+			check_crc     : IN std_logic;
+			img_mounted   : IN std_logic;
+			img_size      : IN std_logic_vector (31 DOWNTO 0);
 			sd_lba        : OUT std_logic_vector (31 DOWNTO 0);
 			sd_rd         : OUT std_logic;
 			sd_wr         : OUT std_logic;
@@ -116,19 +111,7 @@ ARCHITECTURE Behavioral OF Microdisc IS
 			sd_buff_addr  : IN std_logic_vector (8 DOWNTO 0);
 			sd_buff_dout  : IN std_logic_vector (7 DOWNTO 0);
 			sd_buff_din   : OUT std_logic_vector (7 DOWNTO 0);
-			sd_buff_wr    : IN std_logic;
- 
-			prepare       : OUT std_logic;
-			size_code     : IN std_logic_vector (2 DOWNTO 0); 
-			
-			input_active  : IN std_logic;
-	      input_addr    : IN std_logic_vector (20 DOWNTO 0);
-	      input_data    : IN std_logic_vector (7 DOWNTO 0);
-	      input_wr      : IN std_logic;
-	      buff_addr     : OUT std_logic_vector (19 DOWNTO 0);	  
-	      buff_read     : OUT std_logic;	  
-	      buff_din      : IN std_logic_vector (7 DOWNTO 0)
- 
+			sd_buff_wr    : IN std_logic
 		);
 	END COMPONENT;
  
@@ -167,57 +150,41 @@ ARCHITECTURE Behavioral OF Microdisc IS
 	SIGNAL inMCRQ : std_logic;
 
 	SIGNAL fdd_busy : std_logic;
-	SIGNAL fdd_prepare : std_logic;
 
 BEGIN
 	fdc1 : wd1793
-		GENERIC MAP
-		(
-		EDSK => 1, 
-		RWMODE => 1
-		)
 		PORT MAP
 		(
-			clk_sys       => clk_sys, 
-			ce            => fdc_CLK_en, 
- 
-			reset         => NOT nRESET, 
-			io_en         => NOT fdc_nCS, 
+			clk_sys       => clk_sys,
+			ce            => fdc_CLK_en,
+			reset         => NOT nRESET,
+			io_en         => NOT fdc_nCS,
 			rd            => NOT fdc_nRE,
 			wr            => NOT fdc_nWE,
-			addr          => fdc_A, 
-			din           => fdc_DALin, 
-			dout          => fdc_DALout, 
- 
-			intrq         => fdc_IRQ, 
-			drq           => fdc_DRQ, 
- 
-			ready         => fdd_ready and not fdd_prepare, 
-			busy          => fdd_busy, 
- 
-			layout        => fdd_layout , --fdd_layout, 
-			size_code     => "001", 
-			side          => SSEL, 
-			prepare       => fdd_prepare,
-			img_mounted   => img_mounted, 
-			wp            => img_wp, 
-			img_size      => img_size (19 DOWNTO 0), 
-			sd_lba        => sd_lba, 
-			sd_rd         => sd_rd, 
-			sd_wr         => sd_wr, 
-			sd_ack        => sd_ack, 
-			sd_buff_addr  => sd_buff_addr, 
-			sd_buff_dout  => sd_dout, 
+			addr          => fdc_A,
+			din           => fdc_DALin,
+			dout          => fdc_DALout,
+			drq           => fdc_DRQ,
+			intrq         => fdc_IRQ,
+			busy          => fdd_busy,
+			headloaded    => OPEN,
+			wp            => img_wp,
+			side          => SSEL,
+			-- the drive is always ready, with or without a disk: the FDC then waits
+			-- for an image, so the boot ROM stays on "insert system disc"
+			ready         => '1',
+			check_crc     => '0', -- old images store F7 F7 in place of the CRCs
+			img_mounted   => img_mounted,
+			img_size      => img_size,
+			sd_lba        => sd_lba,
+			sd_rd         => sd_rd,
+			sd_wr         => sd_wr,
+			sd_ack        => sd_ack,
+			sd_buff_addr  => sd_buff_addr,
+			sd_buff_dout  => sd_dout,
 			sd_buff_din   => sd_din,
-			sd_buff_wr    => sd_dout_strobe,
-		
-	      input_active  => '0',
-		   input_addr    => (others => '0'),	
-			input_data    => (others => '0'),
-			input_wr      => '0',
-			buff_din      => (others => '0')
-			
-			); 
+			sd_buff_wr    => sd_dout_strobe
+		); 
  
 
 			-- Reset

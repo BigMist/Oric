@@ -20,7 +20,7 @@ Actually Oric 1, Oric Atmos and Microdisc are fully functional.
 * switchable **ROM** (between 1.1a ATMOS version and 1.0 ORIC 1 version).
 * Tape loading working (via audio cable on the RX pin).
 * Oric Microdisc implementation vía **CUMULUS**
-* Disc Read / Write operations fully supported with EDSK (The same as amstrad cpc) format.
+* Disc read and write, formatting included, on Oricutron MFM_DISK images.
 * Disc Sedoric/OricDOS Operating System Loading fully working
 
 ### TODO
@@ -66,11 +66,16 @@ Actually Oric 1, Oric Atmos and Microdisc are fully functional.
 
 ## About disk images.
 
-  Despite of the .dsk extension, Disk images are the defacto standard **edsk** for disk preservation (also known as "AMSTRAD CPC EXTENDED FORMAT"). To convert images
-  from the oric "dsk" to the needed "dsk" you need the [HxCFloppyEmulator software] (https://hxc2001.com/download/floppy_drive_emulator/HxCFloppyEmulator_soft.zip).
+  The core reads the same disk images as Oricutron, the MFM_DISK format, so most .dsk files found
+  for the Oric work as they are. Images in the EXTENDED CPC DSK format (EDSK), used by earlier
+  versions of this core, are no longer read. They can be converted with
+  [edsk2mfm.py](https://github.com/rampa069/orix-fpga/blob/master/sim/fdc/edsk2mfm.py):
 
-  Load the disk oric disk and export it as **CPC DSK file** the resulting image should load flawlessly on the Oric.
-  This images are also compatible with fastfloppy firmware on gothek, cuamana reborn, etc working with real orics.
+	python3 edsk2mfm.py old.dsk new.dsk
+
+  Writing and formatting change the image on the SD card in place, so keep a copy of the
+  originals. A disk can only be formatted with as many tracks and sides as the image already
+  has, since the image file cannot grow.
 
 ## Joystick
 
