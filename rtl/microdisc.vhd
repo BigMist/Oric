@@ -58,12 +58,12 @@ ENTITY Microdisc IS
 		nEOE            : OUT std_logic; -- Output Enable
 		ENA             : IN std_logic;
  
-		img_mounted     : IN std_logic;
+		img_mounted     : IN std_logic_vector (1 DOWNTO 0); -- drives A: and B:
 		img_wp          : IN std_logic;
 		img_size        : IN std_logic_vector (31 DOWNTO 0);
 		sd_lba          : OUT std_logic_vector (31 DOWNTO 0);
-		sd_rd           : OUT std_logic;
-		sd_wr           : OUT std_logic;
+		sd_rd           : OUT std_logic_vector (1 DOWNTO 0);
+		sd_wr           : OUT std_logic_vector (1 DOWNTO 0);
 		sd_ack          : IN std_logic;
 		sd_buff_addr    : IN std_logic_vector (8 DOWNTO 0);
 		sd_dout         : IN std_logic_vector (7 DOWNTO 0);
@@ -81,6 +81,7 @@ ARCHITECTURE Behavioral OF Microdisc IS
 	COMPONENT wd1793
 		GENERIC
 		(
+			DRIVES        : INTEGER := 1;
 			STRICT_ID     : INTEGER := 0
 		);
 		PORT
@@ -99,14 +100,15 @@ ARCHITECTURE Behavioral OF Microdisc IS
 			busy          : OUT std_logic;
 			headloaded    : OUT std_logic;
 			wp            : IN std_logic;
+			drive         : IN std_logic_vector (1 DOWNTO 0);
 			side          : IN std_logic;
 			ready         : IN std_logic;
 			check_crc     : IN std_logic;
-			img_mounted   : IN std_logic;
+			img_mounted   : IN std_logic_vector (DRIVES-1 DOWNTO 0);
 			img_size      : IN std_logic_vector (31 DOWNTO 0);
 			sd_lba        : OUT std_logic_vector (31 DOWNTO 0);
-			sd_rd         : OUT std_logic;
-			sd_wr         : OUT std_logic;
+			sd_rd         : OUT std_logic_vector (DRIVES-1 DOWNTO 0);
+			sd_wr         : OUT std_logic_vector (DRIVES-1 DOWNTO 0);
 			sd_ack        : IN std_logic;
 			sd_buff_addr  : IN std_logic_vector (8 DOWNTO 0);
 			sd_buff_dout  : IN std_logic_vector (7 DOWNTO 0);
@@ -153,6 +155,10 @@ ARCHITECTURE Behavioral OF Microdisc IS
 
 BEGIN
 	fdc1 : wd1793
+		GENERIC MAP
+		(
+			DRIVES        => 2  -- A: and B:, C: and D: are not fitted
+		)
 		PORT MAP
 		(
 			clk_sys       => clk_sys,
@@ -169,6 +175,7 @@ BEGIN
 			busy          => fdd_busy,
 			headloaded    => OPEN,
 			wp            => img_wp,
+			drive         => DSEL,
 			side          => SSEL,
 			-- the drive is always ready, with or without a disk: the FDC then waits
 			-- for an image, so the boot ROM stays on "insert system disc"

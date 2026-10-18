@@ -60,8 +60,16 @@
 // and Type III commands wait, busy, until an image is mounted (then they go
 // on as with a disk just inserted) or a Force Interrupt ends them. The Oric
 // Microdisc boot ROM relies on this to stay on "insert system disc".
+//
+// Up to four drives share the controller, as on a real board: drive selects
+// one of them, and each of the first DRIVES drives has its own image (its own
+// img_mounted, sd_rd and sd_wr bit), header and head position. The track
+// register stays shared, so the DOS reloads it when it changes drive, and the
+// track cache is refilled when the drive changes. A drive at or above DRIVES
+// is not fitted and its READY line is low.
 
 module wd1793 #(
+	parameter DRIVES       = 1,        // drives with an image, 1 to 4
 	parameter STRICT_ID    = 0,        // 1: the ID track must match the track register
 	parameter INDEX_PERIOD = 800000,   // ce ticks per turn: 200 ms (300 rpm) at 4 MHz
 	parameter INDEX_WIDTH  = 8000      // ce ticks of index pulse: 2 ms at 4 MHz
@@ -82,15 +90,16 @@ module wd1793 #(
 	output       headloaded,
 
 	input        wp,          // write protect
+	input  [1:0] drive,       // drive select
 	input        side,
 	input        ready,
 	input        check_crc,   // 1: check the ID and data CRCs (see above)
 
-	input        img_mounted, // signaling that new image has been mounted
-	input [31:0] img_size,    // size of image in bytes
-	output[31:0] sd_lba,
-	output reg   sd_rd,
-	output reg   sd_wr,
+	input  [DRIVES-1:0] img_mounted, // signaling that new image has been mounted
+	input        [31:0] img_size,    // size of image in bytes
+	output       [31:0] sd_lba,
+	output [DRIVES-1:0] sd_rd,
+	output [DRIVES-1:0] sd_wr,
 	input        sd_ack,
 	input  [8:0] sd_buff_addr,
 	input  [7:0] sd_buff_dout,
@@ -141,11 +150,34 @@ wd1793_dpram sbuf
 	.q_b(buff_dout)
 );
 
-// Image geometry, read from the header on the first access after a mount
-reg  [23:0] disk_size = 0;
-reg         hdr_loaded = 0, hdr_valid = 0;
-wire        disk_in = |disk_size;   // an image is in the drive
-reg   [7:0] hdr_sides, hdr_tracks;
+// Selected drive. Drives at or above DRIVES are not fitted: no image, and
+// their READY line is low.
+reg   [1:0] drv = 0;
+always @(posedge clk_sys) drv <= drive;
+wire        rdy = ready && (drv < DRIVES);
+
+// SD block requests, routed to the image of the drive that made them
+reg         req_rd = 0, req_wr = 0;
+reg   [1:0] req_drv = 0;
+always @(posedge clk_sys) if(!req_rd && !req_wr) req_drv <= drv;
+assign sd_rd = req_rd ? DRIVES'(1) << req_drv : '0;
+assign sd_wr = req_wr ? DRIVES'(1) << req_drv : '0;
+
+// Image geometry of each drive, read from the header on the first access
+// after a mount, and the "real" head position of each drive
+reg  [23:0] disk_size_d[4] = '{default: 24'd0};
+reg         hdr_loaded_d[4] = '{default: 1'b0};
+reg         hdr_valid_d[4] = '{default: 1'b0};
+reg   [7:0] hdr_sides_d[4], hdr_tracks_d[4];
+reg   [7:0] disk_track_d[4] = '{default: 8'd0};
+
+wire [23:0] disk_size  = disk_size_d[drv];
+wire        hdr_loaded = hdr_loaded_d[drv];
+wire        hdr_valid  = hdr_valid_d[drv];
+wire  [7:0] hdr_sides  = hdr_sides_d[drv];
+wire  [7:0] hdr_tracks = hdr_tracks_d[drv];
+wire  [7:0] disk_track = disk_track_d[drv];
+wire        disk_in    = |disk_size;   // an image is in the drive
 
 wire        trk_exists = hdr_valid && (disk_track < hdr_tracks) && (!side || hdr_sides == 2);
 wire  [8:0] trk_index  = {1'b0, disk_track} + (side ? {1'b0, hdr_tracks} : 9'd0);
@@ -175,6 +207,7 @@ wire [12:0] e_off   = tab_q[12:0];
 reg         cache_valid = 0;
 reg   [7:0] cache_track;
 reg         cache_side;
+reg   [1:0] cache_drv;
 reg   [5:0] n_sect = 0;
 reg   [4:0] sec_idx = 0;        // last sector passed under the head
 wire  [4:0] next_ra = ({1'b0, tab_ra} + 1'd1 >= n_sect) ? 5'd0 : tab_ra + 1'd1;
@@ -296,8 +329,8 @@ reg   [7:0] wdreg_track;
 reg   [7:0] wdreg_sector;
 reg   [7:0] wdreg_data;
 wire  [7:0] wdreg_status = cmd_mode == 0 ?
-	{~ready, s_readonly & s_wpe, s_headloaded, s_seekerr | ~ready, s_crcerr, !disk_track, s_index, s_busy}:
-	{~ready, s_readonly & s_wpe, s_wrfault,    s_seekerr | ~ready, s_crcerr, s_lostdata,  s_drq,   s_busy};
+	{~rdy, s_readonly & s_wpe, s_headloaded, s_seekerr | ~rdy, s_crcerr, !disk_track, s_index, s_busy}:
+	{~rdy, s_readonly & s_wpe, s_wrfault,    s_seekerr | ~rdy, s_crcerr, s_lostdata,  s_drq,   s_busy};
 
 reg   [7:0] read_addr[6];
 reg   [7:0] q;
@@ -313,7 +346,6 @@ end
 reg         buff_rd;
 reg         step_direction; // last step direction
 
-reg   [7:0] disk_track;		 // "real" heads position
 reg  [10:0]	data_length;	 // this many bytes to transfer during read/write ops
 io_state_t  state = STATE_IDLE;
 
@@ -335,11 +367,11 @@ end
 always @(posedge clk_sys) begin
 	integer cnt;
 	if(ce) begin
-		if(ready && disk_in) begin
+		if(rdy && disk_in) begin
 			if(cnt) cnt <= cnt - 1;
 				else cnt <= INDEX_PERIOD - 1;
 		end else cnt <= 0;
-		s_index <= ready && disk_in && (cnt < INDEX_WIDTH);
+		s_index <= rdy && disk_in && (cnt < INDEX_WIDTH);
 	end
 end
 
@@ -369,7 +401,7 @@ always @(posedge clk_sys) begin
 	reg       multisector;
 	reg [5:0] ack;
 	reg       sd_busy;
-	reg       old_mounted;
+	reg [DRIVES-1:0] old_mounted;
 	reg [1:0] blk_max;
 	io_state_t load_ret;
 
@@ -401,7 +433,7 @@ always @(posedge clk_sys) begin
 		write_data <= 0;
 		multisector <= 0;
 		step_direction <= 0;
-		disk_track <= 0;
+		for(int d = 0; d < 4; d++) disk_track_d[d] <= 0;
 		wdreg_track <= 0;
 		wdreg_sector <= 0;
 		wdreg_data <= 0;
@@ -417,7 +449,7 @@ always @(posedge clk_sys) begin
 		s_drq_busy <= 0;
 		watchdog_set <= 0;
 		seektimer <= 'h3FF;
-		{ack, sd_wr, sd_rd, sd_busy} <= 0;
+		{ack, req_wr, req_rd, sd_busy} <= 0;
 		scan_mode <= 0;
 		fsm_wr <= 0;
 		tab_we <= 0;
@@ -426,7 +458,7 @@ always @(posedge clk_sys) begin
 	end else if(ce) begin
 
 		ack <= {ack[4:0], sd_ack};
-		if(ack[5:4] == 'b01) {sd_rd,sd_wr} <= 0;
+		if(ack[5:4] == 'b01) {req_rd,req_wr} <= 0;
 		if(ack[5:4] == 'b10) sd_busy <= 0;
 
 		tab_we <= 0;
@@ -451,7 +483,7 @@ always @(posedge clk_sys) begin
 
 			STATE_SEARCH:
 				begin
-					if(!ready) begin
+					if(!rdy) begin
 						s_seekerr <= 1;
 						state <= STATE_ENDCOMMAND;
 					end
@@ -473,7 +505,7 @@ always @(posedge clk_sys) begin
 						s_seekerr <= 1;
 						state <= STATE_ENDCOMMAND;
 					end
-					else if(!cache_valid || (cache_track != disk_track) || (cache_side != side)) state <= STATE_SCAN;
+					else if(!cache_valid || (cache_track != disk_track) || (cache_side != side) || (cache_drv != drv)) state <= STATE_SCAN;
 					else state <= STATE_SEARCH_0;
 				end
 
@@ -540,7 +572,7 @@ always @(posedge clk_sys) begin
 			STATE_LOAD_1:
 				begin
 					sd_busy <= 1;
-					sd_rd   <= 1;
+					req_rd  <= 1;
 					state   <= STATE_LOAD_2;
 				end
 			STATE_LOAD_2: if(!sd_busy) state <= load_ret;
@@ -567,8 +599,8 @@ always @(posedge clk_sys) begin
 					// scan_ptr was set two ce ago, buff_dout holds the byte
 					case(hp)
 						0,1,2,3,4,5,6,7: if(buff_dout != mfm_sig(hp[2:0])) hdr_bad <= 1;
-						8:  hdr_sides  <= buff_dout;
-						12: hdr_tracks <= buff_dout;
+						8:  hdr_sides_d[drv]  <= buff_dout;
+						12: hdr_tracks_d[drv] <= buff_dout;
 						16: if(buff_dout != 1) hdr_bad <= 1;
 						default: if(buff_dout) hdr_bad <= 1;
 					endcase
@@ -578,8 +610,8 @@ always @(posedge clk_sys) begin
 			STATE_HDR_END:
 				begin
 					scan_mode  <= 0;
-					hdr_loaded <= 1;
-					hdr_valid  <= ~hdr_bad && (hdr_sides == 1 || hdr_sides == 2) && hdr_tracks && (hdr_tracks <= 128);
+					hdr_loaded_d[drv] <= 1;
+					hdr_valid_d[drv]  <= ~hdr_bad && (hdr_sides == 1 || hdr_sides == 2) && hdr_tracks && (hdr_tracks <= 128);
 					state      <= hdr_ret;
 				end
 
@@ -592,6 +624,7 @@ always @(posedge clk_sys) begin
 					sec_idx     <= 0;
 					cache_track <= disk_track;
 					cache_side  <= side;
+					cache_drv   <= drv;
 					pstate      <= P_HUNT;
 					sync        <= 0;
 					tpos        <= 0;
@@ -697,7 +730,7 @@ always @(posedge clk_sys) begin
 			STATE_WAIT_READ_1:
 				begin
 					sd_busy <= 1;
-					sd_rd   <= 1;
+					req_rd  <= 1;
 					state   <= STATE_WAIT_READ_2;
 				end
 			STATE_WAIT_READ_2:
@@ -774,7 +807,7 @@ always @(posedge clk_sys) begin
 
 			STATE_WAIT_WRITE:
 				begin
-					if(!ready) begin
+					if(!rdy) begin
 						s_wrfault <= 1;
 						state <= STATE_ENDCOMMAND;
 					end else begin
@@ -785,7 +818,7 @@ always @(posedge clk_sys) begin
 			STATE_WAIT_WRITE_1:
 				begin
 					sd_busy <= 1;
-					sd_wr   <= 1;
+					req_wr  <= 1;
 					state   <= STATE_WAIT_WRITE_2;
 				end
 			STATE_WAIT_WRITE_2:
@@ -869,7 +902,7 @@ always @(posedge clk_sys) begin
 			// READ TRACK: the raw bytes of the image track, block by block
 			STATE_RT:
 				begin
-					if(!ready) state <= STATE_ENDCOMMAND;
+					if(!rdy) state <= STATE_ENDCOMMAND;
 					else if(!disk_in) ; // empty drive: wait for an image
 					else if(!hdr_loaded) begin
 						hdr_ret <= STATE_RT;
@@ -927,7 +960,7 @@ always @(posedge clk_sys) begin
 			// with the translated bytes and written back
 			STATE_WT:
 				begin
-					if(!ready) state <= STATE_ENDCOMMAND;
+					if(!rdy) state <= STATE_ENDCOMMAND;
 					else if(!disk_in) ; // empty drive: wait for an image
 					else if(!hdr_loaded) begin
 						hdr_ret <= STATE_WT;
@@ -1029,7 +1062,7 @@ always @(posedge clk_sys) begin
 			STATE_WT_FLUSH:
 				begin
 					sd_busy <= 1;
-					sd_wr   <= 1;
+					req_wr  <= 1;
 					state   <= STATE_WT_FLUSH_2;
 				end
 			STATE_WT_FLUSH_2:
@@ -1094,7 +1127,7 @@ always @(posedge clk_sys) begin
 									// head load as specified, index, track0
 									s_headloaded <= din[3];
 									wdreg_track <= 0;
-									disk_track <= 0;
+									disk_track_d[drv] <= 0;
 
 									// some programs like it when FDC gets busy for a while
 									s_drq_busy <= 2'b01;
@@ -1103,7 +1136,7 @@ always @(posedge clk_sys) begin
 							'h1:	// SEEK
 								begin
 									// set real track to datareg
-									disk_track <= wdreg_data;
+									disk_track_d[drv] <= wdreg_data;
 									s_headloaded <= din[3];
 									wdreg_track <= wdreg_data;
 									// get busy
@@ -1121,7 +1154,7 @@ always @(posedge clk_sys) begin
 									if (din[6] == 1) step_direction <= din[5]; // 0: forward/in
 
 									// perform step
-									disk_track <= next_track;
+									disk_track_d[drv] <= next_track;
 
 									// update TRACK register too if asked to
 									if (din[4]) wdreg_track <= next_track;
@@ -1216,21 +1249,26 @@ always @(posedge clk_sys) begin
 		end
 	end
 
-	// A new image invalidates the header and the track cache and ends any
-	// command in progress, except one still waiting for the disk or for the
-	// head to settle, which starts over on the new image
+	// A new image invalidates the header of its drive and the track cache. In
+	// the selected drive it also ends any command in progress, except one still
+	// waiting for the disk or for the head to settle, which starts over on the
+	// new image
 	old_mounted <= img_mounted;
-	if(old_mounted && ~img_mounted) begin
-		disk_size   <= |img_size[31:24] ? 24'hFFFFFF : img_size[23:0];
-		hdr_loaded  <= 0;
-		hdr_valid   <= 0;
-		cache_valid <= 0;
-		sec_idx     <= 0;
-		if(state != STATE_IDLE && state != STATE_SEARCH && state != STATE_RT && state != STATE_WT) begin
-			{sd_rd, sd_wr, sd_busy} <= 0;
-			scan_mode <= 0;
-			fsm_wr    <= 0;
-			state     <= STATE_ENDCOMMAND;
+	for(int d = 0; d < DRIVES; d++) begin
+		if(old_mounted[d] && ~img_mounted[d]) begin
+			disk_size_d[d]  <= |img_size[31:24] ? 24'hFFFFFF : img_size[23:0];
+			hdr_loaded_d[d] <= 0;
+			hdr_valid_d[d]  <= 0;
+			cache_valid     <= 0;
+			if(d == drv) begin
+				sec_idx <= 0;
+				if(state != STATE_IDLE && state != STATE_SEARCH && state != STATE_RT && state != STATE_WT) begin
+					{req_rd, req_wr, sd_busy} <= 0;
+					scan_mode <= 0;
+					fsm_wr    <= 0;
+					state     <= STATE_ENDCOMMAND;
+				end
+			end
 		end
 	end
 end

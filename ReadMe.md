@@ -21,6 +21,7 @@ Actually Oric 1, Oric Atmos and Microdisc are fully functional.
 * Tape loading working (via audio cable on the RX pin).
 * Oric Microdisc implementation vía **CUMULUS**
 * Disc read and write, formatting included, on Oricutron MFM_DISK images.
+* Two disc drives, A: and B:, each with its own image.
 * Disc Sedoric/OricDOS Operating System Loading fully working
 
 ### TODO
@@ -45,8 +46,12 @@ Actually Oric 1, Oric Atmos and Microdisc are fully functional.
 
    ![shortcuts](img/shorcuts.jpg?raw=true "Keyboard shortcuts")   
 
-   * Activate FDC controller at OSD MENU
-   * Select an Image from /ORIC directory, exit OSD and press F11. System will boot inmeddiately
+   * Activate the FDC controller in the System page of the OSD menu
+   * Mount an image from the /ORIC directory in Drive A: (and another one in Drive B: if needed),
+     exit the OSD and press F11. The system will boot immediately
+
+   The OSD options are grouped in pages: System (ROM loading and selection, CPU, FDC controller,
+   drive write protection), Video (scandoubler effects) and Audio (stereo mode, tape sounds).
 
 
 

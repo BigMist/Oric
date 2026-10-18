@@ -117,7 +117,8 @@ port (
 	HBLANK     :   out std_logic;
 	VBLANK     :   out std_logic;
 	HSYNC      :   out std_logic;
-	VSYNC      :   out std_logic
+	VSYNC      :   out std_logic;
+	VSYNC_SD   :   out std_logic                      -- vertical sync for the scandoublers
 );
 end;
 
@@ -191,6 +192,11 @@ architecture RTL of ula is
 	signal lHBLANKn     : std_logic;
 	signal BLANKINGn    : std_logic;
 
+	-- Display window for the scandoubler (see "Video window for the scandoubler")
+	signal lHWINn       : std_logic;                     -- horizontal display window
+	signal lVWINn       : std_logic;                     -- vertical display window
+	signal lVSYNC_SDn   : std_logic;                     -- vertical sync for the scandoublers
+
 	signal lDATABUS     : std_logic_vector( 7 downto 0);
 	signal lSHFREG      : std_logic_vector( 5 downto 0);
 	signal lREGHOLD     : std_logic_vector( 6 downto 0);
@@ -244,6 +250,7 @@ begin
 	SYNC    <= lCOMPSYNC;
 	HSYNC   <= lHSYNCn;
 	VSYNC   <= lVSYNCn;
+	VSYNC_SD <= lVSYNC_SDn;
 
 	----------------------
 	----------------------
@@ -325,6 +332,10 @@ begin
 	end process;
 
 	-- Vertical Counter
+	-- As in the HCS10017 (netlist of the decapped chip, design/oric_ula.v in
+	-- github.com/erik-persson/oric-ula): the line count advances when the
+	-- horizontal sync starts (character 49 to 50), so the vertical sync edges
+	-- line up with it, and a frame has 312 lines at 50 Hz, 264 at 60 Hz.
 	u_CPT_V: process(CLK_24, RESET_INT)
 	begin
 		if (RESET_INT = '1') then
@@ -332,10 +343,9 @@ begin
 			lCTR_FLASH <= (others => '0');
 		elsif rising_edge(CLK_24) then
 			if CLK_1_EN = '1' then
-				if (lCTR_H = 63) then
-					-- 50Hz = 312 lines, 60Hz = 260 lines
-					if ((lCTR_V < 312) and lFREQ_SEL='1') or
-						((lCTR_V < 260) and lFREQ_SEL='0') then
+				if (lCTR_H = 49) then
+					if ((lCTR_V < 311) and lFREQ_SEL='1') or
+						((lCTR_V < 263) and lFREQ_SEL='0') then
 						lCTR_V <= lCTR_V + 1;
 					else
 						lCTR_V <= (others => '0');
@@ -349,8 +359,8 @@ begin
 
 
 
-	-- Horizontal Synchronisation
-	lHSYNCn     <= '0' when (lCTR_H >=  49) and (lCTR_H <=  53) else '1';
+	-- Horizontal Synchronisation: 4 us, characters 50 to 53 (paper on 1 to 40)
+	lHSYNCn     <= '0' when (lCTR_H >=  50) and (lCTR_H <=  53) else '1';
 
 	-- Horizontal Blank
 	lHBLANKn    <= '1' when (lCTR_H >=   1) and (lCTR_H <=  40) else '0';
@@ -358,9 +368,9 @@ begin
 	-- Signal to Reload Register to reset attributes
 	lRELOAD_SEL <= '1' when (lCTR_H >=  49) else '0';
 
-	-- Vertical Synchronisation
-	lVSYNC50n   <= '0' when (lCTR_V >= 258) and (lCTR_V <= 259) else '1'; -- 50Hz
-	lVSYNC60n   <= '0' when (lCTR_V >= 241) and (lCTR_V <= 242) else '1'; -- 60Hz
+	-- Vertical Synchronisation: 4 lines, as in the chip (vcnt[8:2] = 64 or 59)
+	lVSYNC50n   <= '0' when (lCTR_V >= 256) and (lCTR_V <= 259) else '1'; -- 50Hz
+	lVSYNC60n   <= '0' when (lCTR_V >= 236) and (lCTR_V <= 239) else '1'; -- 60Hz
 	lVSYNCn     <= lVSYNC50n when lFREQ_SEL='1' else lVSYNC60n;
 
 	-- Vertical Blank
@@ -371,16 +381,40 @@ begin
 
 	-- Assign output signals
 	CLK_FLASH    <= lCTR_FLASH(4); 	-- Flash clock toggles every 16 video frames
-	lCOMPSYNC    <= not (lHSYNCn xor lVSYNCn);
+	lCOMPSYNC    <= lHSYNCn and lVSYNCn;   -- the chip ANDs them (no serration)
 	BLANKINGn    <= lVBLANKn and lHBLANKn;
    --CLK_PIX      <= CLK_PIXEL_INT;
 	
+	-------------------------------------
+	-- Video window for the scandoubler --
+	-------------------------------------
+	-- The paper (characters 1 to 40, lines 0 to 223) is kept black outside by
+	-- BLANKn, as before. HBLANK and VBLANK only frame the picture for the
+	-- scandoubler: one character on each side and 8 lines above and below,
+	-- so that a television does not crop the paper with its overscan (240
+	-- lines, 480 once doubled). The line count changes at character 50,
+	-- inside the horizontal blank, so VBLANK needs no further alignment.
+	--
+	-- VSYNC_SD is the vertical sync for the scandoublers. The one of the chip
+	-- (VSYNC, 4 lines, 56 lines before the paper) is right for a television,
+	-- but a VGA monitor seen on the SiDi128 only locks to a short sync close
+	-- to the picture, as in 640 x 480: VSYNC_SD lasts 2 lines (4 at 31 kHz)
+	-- and starts 17 lines (34 at 31 kHz) before the top border, lines 287
+	-- and 288 at 50 Hz, 239 and 240 at 60 Hz. Like VSYNC, it changes when
+	-- the horizontal sync starts.
+	lVSYNC_SDn  <= '0' when ((lCTR_V = 287 or lCTR_V = 288) and lFREQ_SEL = '1') or
+	                        ((lCTR_V = 239 or lCTR_V = 240) and lFREQ_SEL = '0') else '1';
+	lHWINn      <= '1' when (lCTR_H <= 41) else '0';
+	lVWINn      <= '1' when (lCTR_V < 232) or
+	                        (lCTR_V >= 304 and lFREQ_SEL = '1') or
+	                        (lCTR_V >= 256 and lFREQ_SEL = '0') else '0';
+
 	process
 	begin
 		wait until rising_edge(CLK_24);
 		if CLK_PIXEL_INT = '1' then
-			HBLANK <= not lHBLANKn;
-			VBLANK <= not lVBLANKn;
+			HBLANK <= not lHWINn;
+			VBLANK <= not lVWINn;
 		end if;
 	end process;
 
@@ -438,7 +472,7 @@ begin
 		  lREG_INK   <= (others=>'1');
 		  lREG_STYLE <= (others=>'0');
 		  lREG_PAPER <= (others=>'0');
-		  lREG_MODE  <= (others=>'0');
+		  lREG_MODE  <= "110";      -- 50 Hz, hires: the state of the chip after reset
 	  elsif (lRELOAD_SEL = '1') then
 		  lREG_INK   <= (others=>'1');
 		  lREG_STYLE <= (others=>'0');

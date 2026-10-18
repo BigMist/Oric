@@ -141,20 +141,25 @@ wire TAPE_SOUND=UART_RX;
 `include "build_id.v" 
 
 localparam CONF_STR = {
-	"Oric;ROM;",
+	"Oric;;",
 	"S0U,DSK,Mount Drive A:;",
-	`SEP
+	"S1U,DSK,Mount Drive B:;",
 	"F3,TAP,Load;",
 	"T1,Tape Play/Stop;",
-	"O2,Tape Sounds,Off,On;",
 	`SEP
-	"O3,ROM,Oric Atmos,Oric 1;",
-	"O6,FDD Controller,Off,On;",
-	"O7,Drive Write,Allow,Prohibit;",
-	"OAB,CPU,6502,65C02,65C816;",
-	`SEP
-	"O45,Scandoubler Fx,None,CRT 25%,CRT 50%,CRT 75%;",
-	"O89,Stereo,Off,ABC (West Europe),ACB (East Europe);",
+	// the pages only group the options, the status bits keep their meaning
+	// (saved configurations stay valid)
+	"P1,System;",
+	"P1F0,ROM,Load ROM;",       // same index 0 as the ORIC.ROM loaded at start
+	"P1O3,ROM,Oric Atmos,Oric 1;",
+	"P1OAB,CPU,6502,65C02,65C816;",
+	"P1O6,FDD Controller,Off,On;",
+	"P1O7,Drive Write,Allow,Prohibit;",
+	"P2,Video;",
+	"P2O45,Scandoubler Fx,None,CRT 25%,CRT 50%,CRT 75%;",
+	"P3,Audio;",
+	"P3O89,Stereo,Off,ABC (West Europe),ACB (East Europe);",
+	"P3O2,Tape Sounds,Off,On;",
 	`SEP
 	"T0,Reset;",
   	"V,v3.0.",`BUILD_DATE
@@ -170,6 +175,8 @@ wire        key_strobe;
 wire        key_extended;
 wire        r, g, b; 
 wire        hs, vs;
+wire        vs_sd;          // ULA vertical sync placed for the scandoublers
+wire        no_csync;
 wire        HBlank;
 wire        VBlank;
 wire  [1:0] buttons, switches;
@@ -216,7 +223,11 @@ end
 
 
 	pll pll (
+`ifdef USE_CLOCK_50
+		.inclk0	  (CLOCK_50  ),
+`else
 		.inclk0	  (CLOCK_27  ),
+`endif
 		.c0       (clk_24     ),
 		.c1       (clk_72     ),
 `ifdef USE_HDMI
@@ -261,6 +272,7 @@ user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(2), .FEATURES(32'h0 | (BIG_OSD
 	.switches       	(switches      	),
 	.scandoubler_disable (scandoublerD	),
 	.ypbpr          	(ypbpr          	),
+	.no_csync         (no_csync         ),
 	.key_strobe     	(key_strobe     	),
 	.key_pressed    	(key_pressed    	),
 	.key_extended   	(key_extended   	),
@@ -287,30 +299,13 @@ user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(2), .FEATURES(32'h0 | (BIG_OSD
 
 
 
-	mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(VGA_BITS), .BIG_OSD(BIG_OSD)) mist_video (	
-	.clk_sys      (clk_24     ),
-	.SPI_SCK      (SPI_SCK    ),
-	.SPI_SS3      (SPI_SS3    ),
-	.SPI_DI       (SPI_DI     ),
-	.R            (progress ? !r : r ),
-	.G            (progress ? !g : g ),
-	.B            (progress ? !b : b ),
-	.HSync        (hs         ),
-	.VSync        (vs         ),
-	.VGA_R        (VGA_R      ),
-	.VGA_G        (VGA_G      ),
-	.VGA_B        (VGA_B      ),
-	.VGA_VS       (VGA_VS     ),
-	.VGA_HS       (VGA_HS     ),
-	.ce_divider   (1'b0       ),
-	.scandoubler_disable(scandoublerD	),
-	.scanlines    (status[5:4]),
-	.ypbpr        (ypbpr      )
-	);
+// The tape progress bar is drawn by inverting the picture
+wire vid_r = progress ? !r : r;
+wire vid_g = progress ? !g : g;
+wire vid_b = progress ? !b : b;
 
 `ifdef USE_HDMI
-
-  i2c_master #(28_000_000) i2c_master (
+i2c_master #(48_000_000) i2c_master (
 	.CLK         (clk_hdmi),
 	.I2C_START   (i2c_start),
 	.I2C_READ    (i2c_read),
@@ -325,43 +320,78 @@ user_io #(.STRLEN($size(CONF_STR)>>3), .SD_IMAGES(2), .FEATURES(32'h0 | (BIG_OSD
 	.I2C_SCL     (HDMI_SCL),
 	.I2C_SDA     (HDMI_SDA)
 );
-
-mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(8), .USE_BLANKS(1), .BIG_OSD(BIG_OSD), .VIDEO_CLEANER(1)) hdmi_video (
-	.clk_sys     ( clk_hdmi   ),
-
-	.SPI_SCK     ( SPI_SCK    ),
-	.SPI_SS3     ( SPI_SS3    ),
-	.SPI_DI      ( SPI_DI     ),
-
-	.scanlines   ( status[5:4]  ),
-
-	.ce_divider  ( 3'd1       ),
-
-	.scandoubler_disable ( scandoublerD ),
-	.no_csync    ( 1'b1       ),
-	.ypbpr       ( 1'b0       ),
-	.rotate      ( 2'b00      ),
-	.blend       ( 1'b0       ),
-
-	.R           ( r | progress ),
-	.G           ( g | progress),
-	.B           ( b | progress ),
-
-	.HBlank      ( HBlank      ),
-	.VBlank      ( VBlank      ),
-	.HSync       ( hs      ),
-	.VSync       ( vs      ),
-
-	.VGA_R       ( HDMI_R      ),
-	.VGA_G       ( HDMI_G      ),
-	.VGA_B       ( HDMI_B      ),
-	.VGA_VS      ( HDMI_VS     ),
-	.VGA_HS      ( HDMI_HS     ),
-	.VGA_DE      ( HDMI_DE     )
-);
 assign HDMI_PCLK = clk_hdmi;
 
 `endif
+
+// VGA (and 15 kHz RGB): clk_24 / 4, one sample per 6 MHz ULA pixel. The
+// blanks are not used here, as in the VGA chains of the ZEMMIX and Orix
+// cores. Scandoubled, it takes the vertical sync placed for it by the ULA.
+mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(VGA_BITS), .USE_BLANKS(0), .BIG_OSD(BIG_OSD)) mist_video (
+	.clk_sys        ( clk_24       ),
+	.SPI_SCK        ( SPI_SCK      ),
+	.SPI_SS3        ( SPI_SS3      ),
+	.SPI_DI         ( SPI_DI       ),
+	.scanlines      ( status[5:4]  ),
+	.ce_divider     ( 3'd3         ),
+	.scandoubler_disable ( scandoublerD ),
+	.no_csync       ( no_csync     ),
+	.ypbpr          ( ypbpr        ),
+	.rotate         ( 2'b00        ),
+	.blend          ( 1'b0         ),
+	.R              ( vid_r        ),
+	.G              ( vid_g        ),
+	.B              ( vid_b        ),
+	.HBlank         ( HBlank       ),
+	.VBlank         ( VBlank       ),
+	.HSync          ( hs           ),
+	.VSync          ( scandoublerD ? vs : vs_sd ),
+	.VGA_R          ( vga_r_o      ),
+	.VGA_G          ( vga_g_o      ),
+	.VGA_B          ( vga_b_o      ),
+	.VGA_VS         ( vga_vs_o     ),
+	.VGA_HS         ( vga_hs_o     )
+);
+
+wire [VGA_BITS-1:0] vga_r_o, vga_g_o, vga_b_o;
+wire                vga_hs_o, vga_vs_o;
+
+`ifdef USE_HDMI
+// HDMI: clk_hdmi / 8 (48 MHz, 2 x clk_24), since HDMI_PCLK is this clock and
+// TMDS needs at least 25 MHz. The blanks give the DE window.
+mist_video #(.COLOR_DEPTH(1), .SD_HCNT_WIDTH(11), .OUT_COLOR_DEPTH(8), .USE_BLANKS(1), .BIG_OSD(BIG_OSD), .VIDEO_CLEANER(1)) hdmi_video (
+	.clk_sys        ( clk_hdmi     ),
+	.SPI_SCK        ( SPI_SCK      ),
+	.SPI_SS3        ( SPI_SS3      ),
+	.SPI_DI         ( SPI_DI       ),
+	.scanlines      ( status[5:4]  ),
+	.ce_divider     ( 3'd7         ),
+	.scandoubler_disable ( 1'b0    ),
+	.no_csync       ( 1'b1         ),
+	.ypbpr          ( 1'b0         ),
+	.rotate         ( 2'b00        ),
+	.blend          ( 1'b0         ),
+	.R              ( vid_r        ),
+	.G              ( vid_g        ),
+	.B              ( vid_b        ),
+	.HBlank         ( HBlank       ),
+	.VBlank         ( VBlank       ),
+	.HSync          ( hs           ),
+	.VSync          ( vs_sd        ),
+	.VGA_R          ( HDMI_R       ),
+	.VGA_G          ( HDMI_G       ),
+	.VGA_B          ( HDMI_B       ),
+	.VGA_VS         ( HDMI_VS      ),
+	.VGA_HS         ( HDMI_HS      ),
+	.VGA_DE         ( HDMI_DE      )
+);
+`endif
+
+assign VGA_R  = vga_r_o;
+assign VGA_G  = vga_g_o;
+assign VGA_B  = vga_b_o;
+assign VGA_HS = vga_hs_o;
+assign VGA_VS = vga_vs_o;
 
 oricatmos oricatmos(
 	.clk_in           (clk_24       ),
@@ -380,6 +410,7 @@ oricatmos oricatmos(
 	.VIDEO_B	  (b		),
 	.VIDEO_HSYNC	  (hs           ),
 	.VIDEO_VSYNC	  (vs           ),
+	.VIDEO_VSYNC_SD	  (vs_sd        ),
 	.VIDEO_HBLANK	  (HBlank       ),
 	.VIDEO_VBLANK	  (VBlank       ),
 	.K7_TAPEIN        (tap_running ? tap_out : TAPE_SOUND),
@@ -747,8 +778,8 @@ spdif spdif (
 
 ///////////////////   FDC   ///////////////////
 wire [31:0] sd_lba;
-wire        sd_rd;
-wire        sd_wr;
+wire  [1:0] sd_rd;           // drives A: and B:
+wire  [1:0] sd_wr;
 wire        sd_ack;
 wire        sd_ack_conf;
 wire        sd_conf;
@@ -757,7 +788,7 @@ wire  [8:0] sd_buff_addr;
 wire  [7:0] sd_dout;
 wire  [7:0] sd_din;
 wire        sd_buff_wr;
-wire        img_mounted;
+wire  [1:0] img_mounted;
 wire [31:0] img_size;
 wire        sd_dout_strobe;
 wire        sd_din_strobe;
@@ -765,8 +796,8 @@ wire        sd_din_strobe;
 always @(posedge clk_24) begin
 	reg old_mounted;
 
-	old_mounted <= img_mounted;
-	if(~old_mounted & img_mounted) begin
+	old_mounted <= img_mounted[0];
+	if(~old_mounted & img_mounted[0]) begin
 		fdd_ready <= |img_size;
 	end
 end

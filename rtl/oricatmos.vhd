@@ -66,6 +66,7 @@ entity oricatmos is
     VIDEO_B           : out   std_logic;
     VIDEO_HSYNC       : out   std_logic;
     VIDEO_VSYNC       : out   std_logic;
+    VIDEO_VSYNC_SD    : out   std_logic;              -- vertical sync for the scandoublers
     VIDEO_HBLANK      : out   std_logic;
     VIDEO_VBLANK      : out   std_logic;
     VIDEO_SYNC        : out   std_logic;
@@ -89,12 +90,12 @@ entity oricatmos is
 	 pll_locked        : in std_logic;
 	 disk_enable       : in std_logic;
 	 rom               : in std_logic;
-	 img_mounted:     in std_logic;
+	 img_mounted:     in std_logic_vector (1 downto 0); -- drives A: and B:
 	 img_wp:          in std_logic;
 	 img_size:        in std_logic_vector (31 downto 0);
 	 sd_lba:          out std_logic_vector (31 downto 0);
-	 sd_rd:           out std_logic;
-	 sd_wr:           out std_logic;
+	 sd_rd:           out std_logic_vector (1 downto 0);
+	 sd_wr:           out std_logic_vector (1 downto 0);
 	 sd_ack:          in std_logic;
 	 sd_buff_addr:    in std_logic_vector (8 downto 0);
 	 sd_dout:         in std_logic_vector (7 downto 0);
@@ -265,12 +266,12 @@ COMPONENT Microdisc
 	  nECE : out std_logic;
 	  nEOE : out std_logic;
 	  ENA : in std_logic;
-	  img_mounted : in std_logic;
+	  img_mounted : in std_logic_vector (1 DOWNTO 0);
 	  img_wp : in std_logic;
 	  img_size : in std_logic_vector (31 DOWNTO 0);
 	  sd_lba : out std_logic_vector (31 DOWNTO 0);
-	  sd_rd : out std_logic;
-	  sd_wr : out std_logic;
+	  sd_rd : out std_logic_vector (1 DOWNTO 0);
+	  sd_wr : out std_logic_vector (1 DOWNTO 0);
 	  sd_ack : in std_logic;
 	  sd_buff_addr : in std_logic_vector (8 DOWNTO 0);
 	  sd_dout : in std_logic_vector (7 DOWNTO 0);
@@ -374,6 +375,7 @@ inst_ula : entity work.ULA
 		BLANKn      => BLANKINGn,
 		HSYNC      	=> VIDEO_HSYNC,
 		VSYNC      	=> VIDEO_VSYNC,		
+		VSYNC_SD    => VIDEO_VSYNC_SD,
 		HBLANK      => VIDEO_HBLANK,
 		VBLANK      => VIDEO_VBLANK		
 );
